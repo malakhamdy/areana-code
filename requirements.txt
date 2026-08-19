@@ -1,0 +1,15 @@
+# Core runtime (Python 3.10-3.12)
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+Pillow>=10.4,<13
+streamlit>=1.40,<2
+
+# Arabic-first OCR baseline. Keep Paddle/PaddleOCR compatible as a pair.
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+
+# Local PDF417/barcode decoding (separate from OCR)
+zxing-cpp>=2.2,<3
+
+# Tests
+pytest>=8,<10

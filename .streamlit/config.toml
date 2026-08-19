@@ -1,0 +1,15 @@
+[server]
+address = "0.0.0.0"
+headless = true
+maxUploadSize = 20
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#16A36A"
+backgroundColor = "#F7FAF8"
+secondaryBackgroundColor = "#EAF4EF"
+textColor = "#15352A"
+font = "sans serif"

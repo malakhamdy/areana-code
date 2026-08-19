@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "egyptian-id-ocr"
+version = "0.1.0"
+description = "Arabic-first Egyptian National ID localization, OCR, and verification"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = {text = "Apache-2.0"}
+authors = [{name = "Arena project contributors"}]
+
+dependencies = [
+  "numpy==1.26.4",
+  "opencv-python-headless==4.10.0.84",
+  "Pillow>=10.4,<13",
+]
+
+[tool.setuptools.packages.find]
+include = ["egyptian_id_ocr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
