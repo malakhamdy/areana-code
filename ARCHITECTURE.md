@@ -19,7 +19,8 @@ At implementation start the repository contained only an Apache 2.0 license. The
 - `pipeline.py`: orchestration and partial-failure isolation
 - `visualization.py`: debuggable geometry/localization overlays
 - `privacy.py`: explicit safe export behavior
-- `app.py`: presentation only; model cached as a resource
+- `app.py`: FastAPI API, upload safety, in-memory artifact serialization, and cached model lifecycle
+- `static/`: responsive browser interface for upload, extracted fields, geometry, crops, evidence, and JSON
 
 ## Confidence policy
 

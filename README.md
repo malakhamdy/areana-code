@@ -1,6 +1,6 @@
 # Egyptian National ID — Arabic-first document understanding
 
-A local, inspectable Streamlit pipeline for **document-level** processing of Egyptian National ID photographs. It preserves Arabic identity text, detects and rectifies the physical card, localizes semantic fields in canonical card coordinates, runs field-specific OCR passes, validates the 14-digit NID, and reports extraction/validation/verification as different states.
+A local, inspectable FastAPI website for **document-level** processing of Egyptian National ID photographs. It preserves Arabic identity text, detects and rectifies the physical card, localizes semantic fields in canonical card coordinates, runs field-specific OCR passes, validates the 14-digit NID, and reports extraction/validation/verification as different states.
 
 > This is not an identity-authenticity service. A structurally valid number or repeated OCR result does not prove that a card or person is genuine.
 
@@ -12,8 +12,8 @@ The repository initially contained only `LICENSE`; there was no application, OCR
 |---|---|
 | Current architecture | None (license-only repository) |
 | Current problems | No runnable code, dependencies, OCR, geometry, validation, UI, or tests |
-| Required changes | Create the complete canonical-card pipeline and local Streamlit interface |
-| Main files | `app.py`, `egyptian_id_ocr/*`, `tests/*`, `requirements.txt` |
+| Required changes | Create the complete canonical-card pipeline, HTTP API, and responsive browser interface |
+| Main files | `app.py`, `static/*`, `egyptian_id_ocr/*`, `tests/*`, `requirements.txt` |
 | New modules | image I/O, card detection, geometry, side/layout, localization, preprocessing, OCR adapter/candidates, NID validation, cross-validation, independent verification, privacy, visualization |
 
 ## Pipeline
@@ -77,7 +77,7 @@ Default:
 
 `arabic_PP-OCRv5_mobile_rec` is Paddle's Arabic-script PP-OCRv5 model and supports Arabic letters and numbers. Arabic remains canonical throughout the extraction path. The UI allows the lighter mobile detector where memory/latency matters.
 
-PaddleOCR is always attempted first. An explicitly labeled Arabic Tesseract.js **availability fallback** is included for offline/restricted networks where Paddle weights cannot be fetched; it is not presented as stronger or as a benchmark winner. It loads Arabic plus numeric/Latin recognition data locally, performs no translation, keeps one worker alive, and receives field images only through an in-memory pipe. Model instances are cached and not recreated on every Streamlit rerun.
+PaddleOCR is always attempted first. An explicitly labeled Arabic Tesseract.js **availability fallback** is included for offline/restricted networks where Paddle weights cannot be fetched; it is not presented as stronger or as a benchmark winner. It loads Arabic plus numeric/Latin recognition data locally, performs no translation, keeps one worker alive, and receives field images only through an in-memory pipe. Model instances are cached and reused across HTTP requests.
 
 ## Install and run
 
@@ -89,8 +89,10 @@ source .venv/bin/activate              # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 npm ci                                  # fallback OCR for restricted networks
-streamlit run app.py --server.address 0.0.0.0
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
+
+Open `http://localhost:8000` in your browser. Interactive API documentation is available at `/api/docs`.
 
 On a headless Linux host without `libGL.so.1`, use the provided installer instead:
 
@@ -98,23 +100,11 @@ On a headless Linux host without `libGL.so.1`, use the provided installer instea
 bash scripts/install_headless.sh
 ```
 
-Paddle downloads model weights on the first analysis. Later analyses reuse the cached models. Force CPU with:
+Paddle downloads model weights on the first analysis. Later analyses reuse the cached models. The website's **Advanced** settings select server/mobile detection, CPU/GPU, and one to four OCR evidence passes without restarting the server.
 
-```bash
-EGYID_DEVICE=cpu streamlit run app.py
-```
+## Website and visual debugging
 
-Other environment overrides:
-
-```bash
-EGYID_DETECTION_MODEL=PP-OCRv5_mobile_det
-EGYID_RECOGNITION_MODEL=arabic_PP-OCRv5_mobile_rec
-EGYID_MAX_OCR_VARIANTS=3
-```
-
-## Streamlit debugging
-
-Open the Streamlit URL, upload one or two images, and press **Analyze card**. The **Structured result**, **Geometry**, **Field crops**, **OCR & evidence**, and **JSON** tabs expose the complete visual sequence:
+Open the website, upload one or two images, and press **Analyze document**. The **Overview**, **Localization**, **Crops & enhancement**, **OCR evidence**, and **JSON** tabs expose the complete visual sequence:
 
 1. original image
 2. processing/letterbox canvas

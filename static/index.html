@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Local Arabic-first Egyptian National ID extraction and visual document analysis">
+  <title>Basira ID · Arabic Document Intelligence</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Basira ID home">
+      <span class="brand-mark" aria-hidden="true">ب</span>
+      <span><strong>Basira</strong><small>ID Intelligence</small></span>
+    </a>
+    <div class="topbar-meta">
+      <span class="privacy-pill"><i></i> Local processing</span>
+      <span class="version">v0.2</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">ARABIC-FIRST DOCUMENT AI</span>
+        <h1>Understand the card.<br><em>Verify the evidence.</em></h1>
+        <p>Upload an Egyptian National ID photograph to detect the physical card, correct perspective, localize fields, extract Arabic data, and inspect every decision.</p>
+        <div class="hero-points">
+          <span>✓ Arabic stays Arabic</span>
+          <span>✓ Canonical geometry</span>
+          <span>✓ Explicit uncertainty</span>
+        </div>
+      </div>
+      <div class="pipeline-visual" aria-label="Pipeline overview">
+        <div class="visual-orbit orbit-one"></div>
+        <div class="visual-orbit orbit-two"></div>
+        <div class="mini-card">
+          <div class="mini-photo"></div>
+          <div class="mini-lines"><i></i><i></i><i></i></div>
+          <div class="mini-number">٣٠٠٠١••••••١٣٦</div>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner br"></span><span class="corner bl"></span>
+        </div>
+        <span class="float-label label-detect">CARD DETECTED</span>
+        <span class="float-label label-arabic" dir="rtl">استخراج عربي</span>
+      </div>
+    </section>
+
+    <section class="upload-shell" id="uploadSection">
+      <div class="section-heading">
+        <div><span class="step-number">01</span><h2>Upload card images</h2></div>
+        <p>Front, back, or both. Upload order does not matter.</p>
+      </div>
+
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Upload ID card photographs">
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/bmp" multiple hidden>
+        <div class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+        </div>
+        <h3>Drop your card photos here</h3>
+        <p>or <span>browse your device</span></p>
+        <small>JPEG, PNG, WebP or BMP · max 20 MB each · up to 2 images</small>
+      </div>
+
+      <div class="file-list" id="fileList" aria-live="polite"></div>
+
+      <details class="settings">
+        <summary>Processing settings <span>Advanced</span></summary>
+        <div class="settings-grid">
+          <label>Text detector
+            <select id="detector">
+              <option value="PP-OCRv5_server_det">PP-OCRv5 Server · strongest</option>
+              <option value="PP-OCRv5_mobile_det">PP-OCRv5 Mobile · faster</option>
+            </select>
+          </label>
+          <label>OCR evidence passes
+            <select id="variants">
+              <option value="1">1 pass · fastest</option>
+              <option value="2">2 passes</option>
+              <option value="3" selected>3 passes · recommended</option>
+              <option value="4">4 passes · thorough</option>
+            </select>
+          </label>
+          <label>Compute
+            <select id="device">
+              <option value="auto">Automatic</option>
+              <option value="cpu">CPU</option>
+              <option value="gpu:0">GPU 0</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <button class="analyze-button" id="analyzeButton" disabled>
+        <span>Analyze document</span>
+        <svg viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+      </button>
+      <div class="privacy-note">
+        <span class="shield">◇</span>
+        <p><strong>Private by design.</strong> Images are processed in memory and are not saved. Full National IDs are never written to server logs.</p>
+      </div>
+    </section>
+
+    <section class="loading-panel hidden" id="loadingPanel" aria-live="assertive">
+      <div class="scan-card"><div class="scan-line"></div></div>
+      <div><h2 id="loadingTitle">Preparing document pipeline…</h2><p id="loadingText">Preserving the original image and loading Arabic OCR.</p></div>
+      <div class="loading-track"><i></i></div>
+    </section>
+
+    <section class="error-panel hidden" id="errorPanel" role="alert">
+      <span>!</span><div><h3>Analysis could not finish</h3><p id="errorText"></p></div>
+      <button id="dismissError">Dismiss</button>
+    </section>
+
+    <section class="results hidden" id="resultsSection">
+      <div class="results-header">
+        <div><span class="step-number">02</span><div><p>ANALYSIS COMPLETE</p><h2>Document intelligence</h2></div></div>
+        <div class="document-switcher" id="documentSwitcher"></div>
+      </div>
+
+      <div class="engine-banner" id="engineBanner"></div>
+      <div class="metrics" id="metrics"></div>
+      <div class="warnings hidden" id="warnings"></div>
+
+      <nav class="result-tabs" aria-label="Result views">
+        <button class="active" data-tab="overview">Overview</button>
+        <button data-tab="geometry">Localization</button>
+        <button data-tab="crops">Crops & enhancement</button>
+        <button data-tab="evidence">OCR evidence</button>
+        <button data-tab="json">JSON</button>
+      </nav>
+
+      <div class="tab-panel active" id="tab-overview">
+        <div class="panel-heading"><div><span>STRUCTURED DATA</span><h3>Extracted fields</h3></div><p>Arabic is the canonical identity representation.</p></div>
+        <div id="fieldsTable"></div>
+        <div class="consistency" id="consistency"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-geometry">
+        <div class="panel-heading"><div><span>VISUAL PIPELINE</span><h3>Geometry and localization</h3></div><p>Every field is localized on the rectified canonical card.</p></div>
+        <div class="stage-timeline" id="geometryGallery"></div>
+        <details class="debug-details"><summary>Transformation metadata</summary><pre id="transformJson"></pre></details>
+      </div>
+
+      <div class="tab-panel" id="tab-crops">
+        <div class="panel-heading"><div><span>FIELD PROCESSING</span><h3>Crops and preprocessing</h3></div><p>Each field receives an independent OCR treatment.</p></div>
+        <div id="cropGallery"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-evidence">
+        <div class="panel-heading"><div><span>PROVENANCE</span><h3>OCR candidates and verification</h3></div><p>Confidence is evidence—not proof of correctness.</p></div>
+        <div class="evidence-list" id="evidenceList"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-json">
+        <div class="panel-heading"><div><span>STRUCTURED OUTPUT</span><h3>Machine-readable result</h3></div><label class="toggle"><input type="checkbox" id="sensitiveToggle"><i></i> Include full NID</label></div>
+        <div class="json-toolbar"><span id="jsonMode">Sensitive identifiers masked</span><button id="downloadJson">Download JSON</button></div>
+        <pre class="json-output" id="jsonOutput"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Basira ID</span><p>Document-level OCR with explicit evidence and uncertainty.</p><a href="/api/docs">API docs</a></footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

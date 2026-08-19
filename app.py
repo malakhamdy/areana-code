@@ -1,279 +1,262 @@
-"""Streamlit interface for the Arabic-first Egyptian ID pipeline."""
+"""FastAPI website for Arabic-first Egyptian National ID extraction.
+
+Run with: uvicorn app:app --host 0.0.0.0 --port 8000
+"""
 from __future__ import annotations
 
-import html
-import json
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+import base64
+import threading
+from pathlib import Path
 from typing import Any
 
-import streamlit as st
+import cv2
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from egyptian_id_ocr.config import OCRConfig
-from egyptian_id_ocr.ocr.base import UnavailableOCREngine
+from egyptian_id_ocr.image_io import ImageValidationError
+from egyptian_id_ocr.ocr.base import OCREngine
 from egyptian_id_ocr.ocr.paddle_engine import get_paddle_engine
 from egyptian_id_ocr.ocr.tesseract_js_engine import TesseractJSEngine
 from egyptian_id_ocr.pipeline import EgyptianIDPipeline, PipelineOutput
 from egyptian_id_ocr.privacy import redacted_result
 
-st.set_page_config(
-    page_title="Egyptian ID • Arabic OCR",
-    page_icon="🇪🇬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown(
-    """
-<style>
-.block-container {padding-top: 1.4rem; max-width: 1500px;}
-.hero {padding: 1.3rem 1.5rem; border-radius: 18px; color: white;
-  background: linear-gradient(125deg, #0d4935 0%, #157a55 60%, #d6a72b 140%);
-  margin-bottom: 1rem; box-shadow: 0 12px 30px rgba(13,73,53,.16);}
-.hero h1 {font-size: 2rem; margin: 0 0 .35rem 0;}
-.hero p {margin: 0; opacity: .92;}
-.rtl-value {direction: rtl; text-align: right; font-size: 1.15rem; font-family: Tahoma, Arial, sans-serif;
-  border: 1px solid #cfe3d8; background: white; padding: .7rem .85rem; border-radius: 10px;}
-.status {display:inline-block; padding:.22rem .58rem; border-radius:999px; font-size:.76rem; font-weight:700;}
-.good {background:#d8f4e6; color:#075c3a}.warn {background:#fff0cc;color:#815400}.bad {background:#fde2e2;color:#912626}
-.small-note {color:#547065; font-size:.84rem;}
-[data-testid="stMetric"] {background:white; border:1px solid #dce9e2; padding:.65rem; border-radius:12px;}
-</style>
-<div class="hero">
-  <h1>Arabic-first Egyptian National ID understanding</h1>
-  <p>كشف البطاقة ← تصحيح المنظور ← تحديد الحقول ← OCR عربي ← تحقق مستقل</p>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+ROOT = Path(__file__).resolve().parent
+STATIC = ROOT / "static"
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/bmp",
+    "image/x-ms-bmp",
+}
+ALLOWED_DETECTORS = {"PP-OCRv5_server_det", "PP-OCRv5_mobile_det"}
 
 
-@st.cache_resource(show_spinner="Loading Arabic PP-OCRv5 models for the first time…")
-def load_ocr(device: str, detection_model: str, recognition_model: str):
-    return get_paddle_engine(device, detection_model, recognition_model)
+@dataclass(frozen=True)
+class EngineBundle:
+    engine: OCREngine
+    provider: str
+    primary_model: str
+    detail: str
 
 
-@st.cache_resource(show_spinner="Starting local Arabic fallback OCR…")
-def load_fallback_ocr():
-    return TesseractJSEngine()
+class ModelManager:
+    """Load OCR once and cache failures/fallbacks across HTTP requests."""
 
+    def __init__(self) -> None:
+        self._bundles: dict[tuple[str, str], EngineBundle] = {}
+        self._fallback: TesseractJSEngine | None = None
+        self._lock = threading.Lock()
 
-with st.sidebar:
-    st.header("Processing settings")
-    device = st.selectbox("Compute device", ["auto", "cpu", "gpu:0"], index=0)
-    detector_choice = st.selectbox(
-        "Text detector",
-        ["PP-OCRv5_server_det", "PP-OCRv5_mobile_det"],
-        help="Server detection is the stronger default; mobile uses less memory.",
-    )
-    variants = st.slider("OCR passes per field", 1, 4, 3)
-    include_sensitive_export = st.toggle(
-        "Include complete NID in JSON export",
-        value=False,
-        help="Off by default. On-screen extraction remains visible to you.",
-    )
-    st.divider()
-    st.markdown("**Canonical recognizer**")
-    st.code("arabic_PP-OCRv5_mobile_rec", language=None)
-    st.caption("Arabic is retained. No Arabic→English translation is used for extraction.")
-    st.warning(
-        "Identity images are processed in memory. This app does not save uploads or log full NID values."
-    )
-
-uploaded = st.file_uploader(
-    "Upload one or two card photographs (front/back order does not matter)",
-    type=["png", "jpg", "jpeg", "webp", "bmp"],
-    accept_multiple_files=True,
-    help="For best results: fill the frame, avoid glare, and keep all four corners visible.",
-)
-if len(uploaded) > 2:
-    st.warning("Only the first two images will be processed in this run.")
-
-run = st.button("Analyze card", type="primary", disabled=not uploaded, use_container_width=True)
-
-if not uploaded:
-    col1, col2, col3 = st.columns(3)
-    col1.info("**1 · Geometry**\n\nAspect-preserving normalization, physical card detection, corners, and homography.")
-    col2.info("**2 · Arabic OCR**\n\nField-specific crops and preprocessing with Arabic PP-OCRv5.")
-    col3.info("**3 · Evidence**\n\nNID structure, candidate agreement, provenance, and explicit conflicts.")
-    st.caption(
-        "DOB and gender are derived from a validated NID when the selected card layout does not print them. "
-        "They are not described as independently cross-validated unless a second source exists."
-    )
-
-if run:
-    engine: Any
-    try:
-        engine = load_ocr(device, detector_choice, "arabic_PP-OCRv5_mobile_rec")
-        st.success(f"OCR ready: {engine.name}")
-    except Exception as exc:
-        st.warning(f"Arabic PaddleOCR could not load in this environment: {exc}")
-        try:
-            engine = load_fallback_ocr()
-            st.info(
-                "Using the local Arabic Tesseract.js availability fallback. "
-                "PaddleOCR remains the configured primary model and should be preferred locally."
-            )
-        except Exception as fallback_exc:
-            st.error(f"Local fallback OCR could not load: {fallback_exc}")
-            st.info("Geometry and localization will still run, but fields cannot be extracted.")
-            engine = UnavailableOCREngine(f"{exc}; fallback: {fallback_exc}")
-
-    config = OCRConfig(
-        device=device,
-        detection_model=detector_choice,
-        recognition_model="arabic_PP-OCRv5_mobile_rec",
-        max_variants_per_field=variants,
-    )
-    pipeline = EgyptianIDPipeline(engine, config)
-    outputs: list[tuple[str, PipelineOutput]] = []
-    progress = st.progress(0, text="Starting document pipeline…")
-    for index, file in enumerate(uploaded[:2]):
-        try:
-            output = pipeline.process(file.getvalue())
-            outputs.append((file.name, output))
-        except Exception as exc:
-            st.error(f"Could not process image {index + 1}: {type(exc).__name__}: {exc}")
-        progress.progress(
-            (index + 1) / min(2, len(uploaded)), text=f"Processed image {index + 1}"
-        )
-    progress.empty()
-    st.session_state["pipeline_outputs"] = outputs
-
-for image_index, (filename, output) in enumerate(st.session_state.get("pipeline_outputs", []), start=1):
-    result = output.result
-    artifacts = output.artifacts
-    st.markdown(f"## Document {image_index}")
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("Card", "Detected" if result.is_egyptian_id else "Uncertain")
-    metric_cols[1].metric("Side", result.side.value.upper())
-    metric_cols[2].metric("Card confidence", f"{result.card_detection_confidence:.0%}")
-    metric_cols[3].metric("Side confidence", f"{result.side_confidence:.0%}")
-    metric_cols[4].metric("Image quality", f"{result.image_quality.overall_score:.0%}")
-
-    if result.warnings:
-        with st.expander(f"⚠ {len(result.warnings)} processing warning(s)", expanded=True):
-            for warning in result.warnings:
-                st.write(f"• {warning}")
-
-    result_tab, geometry_tab, crops_tab, evidence_tab, json_tab = st.tabs(
-        ["Structured result", "Geometry", "Field crops", "OCR & evidence", "JSON"]
-    )
-
-    with result_tab:
-        all_fields = {**result.fields, **result.derived}
-        if not all_fields:
-            st.warning("No semantic fields were forced for this side/classification.")
-        rows = []
-        for name, field in all_fields.items():
-            value = field.normalized or "—"
-            rows.append(
-                {
-                    "Field": name,
-                    "Value": value,
-                    "Source": field.source,
-                    "OCR": f"{field.ocr_confidence:.0%}" if field.ocr_confidence else "—",
-                    "Localization": f"{field.localization_confidence:.0%}",
-                    "Validation": f"{field.validation_confidence:.0%}" if field.validation_confidence else "—",
-                    "Status": field.status.value,
-                }
-            )
-        if rows:
-            st.dataframe(rows, use_container_width=True, hide_index=True)
-            st.markdown("### Arabic canonical values")
-            for name, field in all_fields.items():
-                if not field.normalized:
-                    continue
-                css_class = "good" if field.status.value in {"VERIFIED", "VALIDATED", "CROSS_VALIDATED"} else "warn" if field.status.value in {"EXTRACTED", "LOW_CONFIDENCE"} else "bad"
-                safe_value = html.escape(str(field.normalized)).replace("\n", "<br>")
-                st.markdown(
-                    f"**{html.escape(name)}** &nbsp; <span class='status {css_class}'>{field.status.value}</span>"
-                    f"<div class='rtl-value' lang='ar'>{safe_value}</div>",
-                    unsafe_allow_html=True,
+    def get(self, detector: str, device: str = "auto") -> EngineBundle:
+        key = (detector, device)
+        with self._lock:
+            cached = self._bundles.get(key)
+            if cached:
+                return cached
+            model_name = "arabic_PP-OCRv5_mobile_rec"
+            try:
+                engine = get_paddle_engine(device, detector, model_name)
+                bundle = EngineBundle(
+                    engine=engine,
+                    provider="paddleocr",
+                    primary_model=f"{detector} + {model_name}",
+                    detail="Arabic PaddleOCR primary model is active.",
                 )
+            except Exception as exc:
+                if self._fallback is None:
+                    self._fallback = TesseractJSEngine()
+                bundle = EngineBundle(
+                    engine=self._fallback,
+                    provider="tesseract_js_fallback",
+                    primary_model=f"{detector} + {model_name}",
+                    detail=(
+                        "PaddleOCR weights were unavailable in this runtime; the local Arabic "
+                        "availability fallback is active. Primary error: " + _short_error(exc)
+                    ),
+                )
+            self._bundles[key] = bundle
+            return bundle
 
-        st.markdown("### Cross-field consistency")
-        cross = result.cross_field_validation
-        st.write(f"**Overall:** {cross.get('overall_consistency')}")
-        for item in cross.get("matches", []):
-            st.success(item)
-        for item in cross.get("mismatches", []):
-            st.error(item)
-        for item in cross.get("warnings", []):
-            st.info(item)
+    def close(self) -> None:
+        with self._lock:
+            if self._fallback:
+                self._fallback.close()
+                self._fallback = None
+            self._bundles.clear()
 
-    with geometry_tab:
-        st.markdown("#### 1. Original image (preserved)")
-        st.image(artifacts.original_image, use_container_width=True)
-        st.markdown("#### 2. Aspect-preserving processing canvas")
-        st.image(artifacts.processing_image, use_container_width=True)
-        st.markdown("#### 3. Physical card + ordered corners")
-        st.image(artifacts.card_detection_overlay, use_container_width=True)
-        st.markdown("#### 4. Perspective-corrected canonical card")
-        st.image(artifacts.canonical_card, use_container_width=True)
-        st.markdown("#### 5. Dynamic field localization")
-        st.image(artifacts.field_localization_overlay, use_container_width=True)
-        with st.expander("Transformations and normalized boxes"):
-            st.json(result.debug.get("transformations", {}), expanded=False)
-            st.json(result.debug.get("localization", {}), expanded=False)
 
-    with crops_tab:
-        if not artifacts.crops:
-            st.info("No field crops are available for this side.")
-        for name, crop in artifacts.crops.items():
-            st.markdown(f"### {name}")
-            st.image(crop, caption="Canonical-card crop", use_container_width=True)
-            quality = result.debug.get("crop_quality", {}).get(name)
-            if quality:
-                st.json(quality, expanded=False)
-            variants_map = artifacts.preprocessed_crops.get(name, {})
-            if variants_map:
-                columns = st.columns(min(3, len(variants_map)))
-                for variant_index, (variant_name, variant_image) in enumerate(variants_map.items()):
-                    columns[variant_index % len(columns)].image(
-                        variant_image, caption=variant_name, use_container_width=True
-                    )
+model_manager = ModelManager()
 
-    with evidence_tab:
-        all_fields = {**result.fields, **result.derived}
-        for name, field in all_fields.items():
-            with st.expander(f"{name} · {field.status.value}", expanded=name == "national_id"):
-                st.write(field.verification.get("reason", "No verification evidence."))
-                if field.warnings:
-                    for warning in field.warnings:
-                        st.warning(warning)
-                if field.candidates:
-                    st.dataframe(
-                        [
-                            {
-                                "Variant": candidate.preprocessing_variant,
-                                "Raw": candidate.raw,
-                                "Normalized": candidate.normalized,
-                                "OCR confidence": candidate.confidence,
-                                "Rank score": candidate.score,
-                                "Validation": candidate.validation.get("status", "—"),
-                            }
-                            for candidate in field.candidates
-                        ],
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                if field.validation:
-                    st.markdown("**Validation details**")
-                    st.json(field.validation, expanded=False)
-                if field.verification:
-                    st.markdown("**Verification details**")
-                    st.json(field.verification, expanded=False)
 
-    with json_tab:
-        payload = result.to_dict()
-        if not include_sensitive_export:
-            payload = redacted_result(payload)
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-        st.code(serialized, language="json")
-        st.download_button(
-            "Download result JSON",
-            serialized,
-            file_name=f"egyptian_id_result_{image_index}.json",
-            mime="application/json",
-            key=f"download-{image_index}",
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    model_manager.close()
+
+
+app = FastAPI(
+    title="Egyptian ID Arabic OCR",
+    version="0.2.0",
+    docs_url="/api/docs",
+    redoc_url=None,
+    lifespan=lifespan,
+)
+app.mount("/assets", StaticFiles(directory=STATIC), name="assets")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/docs"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data: https://fastapi.tiangolo.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self'"
         )
-    st.divider()
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "
+            "script-src 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'self'"
+        )
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/", include_in_schema=False)
+def homepage() -> FileResponse:
+    return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "service": "egyptian-id-arabic-ocr",
+        "version": app.version,
+        "privacy": "uploads are processed in memory and are not persisted",
+    }
+
+
+@app.post("/api/analyze")
+async def analyze(
+    files: list[UploadFile] = File(...),
+    detector: str = Form("PP-OCRv5_server_det"),
+    variants: int = Form(3),
+    device: str = Form("auto"),
+) -> JSONResponse:
+    if not 1 <= len(files) <= 2:
+        raise HTTPException(400, "Upload one or two card images.")
+    if detector not in ALLOWED_DETECTORS:
+        raise HTTPException(400, "Unsupported text detector.")
+    if variants not in range(1, 5):
+        raise HTTPException(400, "OCR passes must be between 1 and 4.")
+    if device not in {"auto", "cpu", "gpu:0"}:
+        raise HTTPException(400, "Unsupported compute device.")
+
+    uploads: list[bytes] = []
+    for uploaded in files:
+        if uploaded.content_type not in ALLOWED_CONTENT_TYPES:
+            raise HTTPException(415, "Only JPEG, PNG, WebP, and BMP images are supported.")
+        data = await uploaded.read(MAX_UPLOAD_BYTES + 1)
+        await uploaded.close()
+        if not data:
+            raise HTTPException(400, "An uploaded image is empty.")
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Each image must be 20 MB or smaller.")
+        uploads.append(data)
+
+    try:
+        bundle = await run_in_threadpool(model_manager.get, detector, device)
+        config = OCRConfig(
+            device=device,
+            detection_model=detector,
+            recognition_model="arabic_PP-OCRv5_mobile_rec",
+            max_variants_per_field=variants,
+        )
+        pipeline = EgyptianIDPipeline(bundle.engine, config)
+        documents = []
+        for index, data in enumerate(uploads, start=1):
+            output = await run_in_threadpool(pipeline.process, data)
+            documents.append(_serialize_output(index, output))
+    except ImageValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (RuntimeError, TimeoutError) as exc:
+        raise HTTPException(503, _short_error(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            500,
+            f"Document processing failed safely ({type(exc).__name__}). No upload was saved.",
+        ) from exc
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "engine": {
+                "provider": bundle.provider,
+                "name": bundle.engine.name,
+                "primary_model": bundle.primary_model,
+                "detail": bundle.detail,
+            },
+            "document_count": len(documents),
+            "documents": documents,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _serialize_output(index: int, output: PipelineOutput) -> dict[str, Any]:
+    result = output.result.to_dict()
+    artifacts = output.artifacts
+    return {
+        "index": index,
+        "result": result,
+        "safe_result": redacted_result(result),
+        "artifacts": {
+            "original": _image_data_url(artifacts.original_image, quality=88),
+            "processing_canvas": _image_data_url(artifacts.processing_image, quality=82),
+            "card_detection": _image_data_url(artifacts.card_detection_overlay, quality=86),
+            "canonical_card": _image_data_url(artifacts.canonical_card, quality=90),
+            "field_localization": _image_data_url(
+                artifacts.field_localization_overlay, quality=90
+            ),
+            "crops": {
+                name: _image_data_url(image, quality=94)
+                for name, image in artifacts.crops.items()
+            },
+            "preprocessed": {
+                field: {
+                    variant: _image_data_url(image, quality=92)
+                    for variant, image in variants.items()
+                }
+                for field, variants in artifacts.preprocessed_crops.items()
+            },
+        },
+    }
+
+
+def _image_data_url(rgb_image, *, quality: int) -> str:
+    bgr = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+    success, encoded = cv2.imencode(
+        ".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+    )
+    if not success:
+        return ""
+    value = base64.b64encode(encoded.tobytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{value}"
+
+
+def _short_error(exc: Exception, limit: int = 280) -> str:
+    message = " ".join(str(exc).split())
+    return (message[: limit - 1] + "…") if len(message) > limit else message
