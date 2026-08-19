@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Streamlit and local secrets
+.streamlit/secrets.toml
+
+# Models and generated outputs
+models/
+node_modules/
+output/
+outputs/
+artifacts/
+*.onnx
+*.pdmodel
+*.pdiparams
+*.traineddata
+
+# Private identity data (never commit real cards)
+data/private/
+data/raw/
+downloads/
+*.zip
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
