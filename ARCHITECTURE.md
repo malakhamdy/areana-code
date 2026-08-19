@@ -31,7 +31,7 @@ The original image remains untouched. Detection uses a letterboxed processing ca
 
 ## Model policy
 
-PaddleOCR is primary. `PP-OCRv5_server_det` plus `arabic_PP-OCRv5_mobile_rec` is the default local baseline. The recognizer is Arabic-script-specific and Arabic output is not routed through translation. Alternative engines must earn inclusion through a labeled project benchmark.
+PaddleOCR is primary. `PP-OCRv5_server_det` plus `arabic_PP-OCRv5_mobile_rec` is the default local baseline. The recognizer is Arabic-script-specific and Arabic output is not routed through translation. A clearly labeled, local Arabic Tesseract.js availability fallback runs only when Paddle model loading fails; it is not treated as a benchmark winner. Any accuracy-oriented alternative must earn inclusion through a labeled project benchmark.
 
 ## Privacy policy
 

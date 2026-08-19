@@ -12,12 +12,14 @@ venv/
 
 # Models and generated outputs
 models/
+node_modules/
 output/
 outputs/
 artifacts/
 *.onnx
 *.pdmodel
 *.pdiparams
+*.traineddata
 
 # Private identity data (never commit real cards)
 data/private/

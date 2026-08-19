@@ -113,7 +113,7 @@ EGYID_MAX_OCR_VARIANTS=3
 
 ## Streamlit debugging
 
-The application exposes the complete visual sequence:
+Open the Streamlit URL, upload one or two images, and press **Analyze card**. The **Structured result**, **Geometry**, **Field crops**, **OCR & evidence**, and **JSON** tabs expose the complete visual sequence:
 
 1. original image
 2. processing/letterbox canvas

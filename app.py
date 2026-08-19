@@ -10,6 +10,7 @@ import streamlit as st
 from egyptian_id_ocr.config import OCRConfig
 from egyptian_id_ocr.ocr.base import UnavailableOCREngine
 from egyptian_id_ocr.ocr.paddle_engine import get_paddle_engine
+from egyptian_id_ocr.ocr.tesseract_js_engine import TesseractJSEngine
 from egyptian_id_ocr.pipeline import EgyptianIDPipeline, PipelineOutput
 from egyptian_id_ocr.privacy import redacted_result
 
@@ -48,6 +49,11 @@ st.markdown(
 @st.cache_resource(show_spinner="Loading Arabic PP-OCRv5 models for the first time…")
 def load_ocr(device: str, detection_model: str, recognition_model: str):
     return get_paddle_engine(device, detection_model, recognition_model)
+
+
+@st.cache_resource(show_spinner="Starting local Arabic fallback OCR…")
+def load_fallback_ocr():
+    return TesseractJSEngine()
 
 
 with st.sidebar:
@@ -99,9 +105,17 @@ if run:
         engine = load_ocr(device, detector_choice, "arabic_PP-OCRv5_mobile_rec")
         st.success(f"OCR ready: {engine.name}")
     except Exception as exc:
-        st.error(f"Arabic OCR could not load: {exc}")
-        st.info("Geometry and localization will still run, but fields cannot be extracted.")
-        engine = UnavailableOCREngine(str(exc))
+        st.warning(f"Arabic PaddleOCR could not load in this environment: {exc}")
+        try:
+            engine = load_fallback_ocr()
+            st.info(
+                "Using the local Arabic Tesseract.js availability fallback. "
+                "PaddleOCR remains the configured primary model and should be preferred locally."
+            )
+        except Exception as fallback_exc:
+            st.error(f"Local fallback OCR could not load: {fallback_exc}")
+            st.info("Geometry and localization will still run, but fields cannot be extracted.")
+            engine = UnavailableOCREngine(f"{exc}; fallback: {fallback_exc}")
 
     config = OCRConfig(
         device=device,

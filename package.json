@@ -1,0 +1,12 @@
+{
+  "name": "egyptian-id-ocr-web-fallback",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline Arabic Tesseract.js fallback for the Streamlit application",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@tesseract.js-data/ara": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "tesseract.js": "7.0.0"
+  }
+}
