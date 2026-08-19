@@ -77,17 +77,18 @@ Default:
 
 `arabic_PP-OCRv5_mobile_rec` is Paddle's Arabic-script PP-OCRv5 model and supports Arabic letters and numbers. Arabic remains canonical throughout the extraction path. The UI allows the lighter mobile detector where memory/latency matters.
 
-No second OCR model is enabled just for architectural complexity. A secondary model should only be added after a fixture-level benchmark demonstrates a practical gain. Model instances are cached and not recreated on every Streamlit rerun.
+PaddleOCR is always attempted first. An explicitly labeled Arabic Tesseract.js **availability fallback** is included for offline/restricted networks where Paddle weights cannot be fetched; it is not presented as stronger or as a benchmark winner. It loads Arabic plus numeric/Latin recognition data locally, performs no translation, keeps one worker alive, and receives field images only through an in-memory pipe. Model instances are cached and not recreated on every Streamlit rerun.
 
 ## Install and run
 
-Python 3.10–3.12 is supported. Python 3.11 is recommended.
+Python 3.10–3.12 is supported. Python 3.11 is recommended. Node.js is optional but enables the bundled offline OCR fallback.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate              # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+npm ci                                  # fallback OCR for restricted networks
 streamlit run app.py --server.address 0.0.0.0
 ```
 
